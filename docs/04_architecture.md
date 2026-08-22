@@ -51,7 +51,7 @@ colleboxは、コレクショングッズをWebブラウザから管理・検索
 | ORM | Drizzle | PostgreSQLへのアクセス |
 | Image Storage | TBD | グッズ画像の保存 |
 | Hosting | Vercel | Webアプリケーションのホスティング |
-| DB Hosting | TBD | PostgreSQLのホスティング |
+| DB Hosting | Supabase | PostgreSQLのホスティング・グッズ画像の保存 |
 | CI/CD | GitHub Actions | テスト・Lint・ビルドなどの自動化 |
 | Testing | Vitest + Playwright | Unit / Integration / E2Eテスト |
 | Code Quality | ESLint + Prettier | コード品質・フォーマット管理 |

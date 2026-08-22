@@ -1,0 +1,1 @@
+ALTER TABLE "items" ALTER COLUMN "target_quantity" SET DEFAULT 1;
