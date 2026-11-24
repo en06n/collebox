@@ -1,235 +1,65 @@
-# Architecture
+# アーキテクチャ
 
-> colleboxのシステム構成・コンポーネント間の関係・データの流れを定義する。
->
-> **Status: Draft**
->
-> 技術選定や実装の進行に応じて更新する。
+この文書は移行後の設計を示す。リポジトリの現行実装は Next.js + TypeScript / Drizzle。採用方針、選定理由、未確定の候補は [技術選定](02_tech-stack.md) を参照。
 
-## 1. システム概要
-
-colleboxは、コレクショングッズをWebブラウザから管理・検索・閲覧するWebアプリケーションである。
-
-ユーザーはWebブラウザからグッズの登録・閲覧・編集・削除や検索・絞り込みを行う。
-
-### 1.1 基本的なデータフロー
+## 1. システム構成
 
 ```text
-[User]
-   │
-   │ HTTPS
-   ▼
-[Next.js Application]
-   │
-   ├──────────────► [Image Storage]
-   │
-   │ Drizzle
-   ▼
-[PostgreSQL]
+ブラウザ
+  ├─ React + TypeScript の SPA を取得 ← 静的ホスティング（Vite のビルド成果物）
+  ├─ HTTPS / ログイン・セッション管理 → Supabase Auth
+  └─ HTTPS / JSON + Bearer アクセストークン → Go REST API
+                                                 ├─ SQL → Supabase PostgreSQL
+                                                 └─ オブジェクト操作 → Cloudflare R2
 ```
 
-1. ユーザーがWebブラウザから操作する
-2. Webアプリケーションがリクエストを受け取る
-3. アプリケーションが必要な処理を行う
-4. PostgreSQLからグッズ情報を取得・更新する
-5. 必要に応じて画像ストレージと連携する
-6. 結果をWebブラウザに返す
+| コンポーネント | 責務 |
+|---|---|
+| React SPA | 一覧・詳細・登録・編集、検索・絞り込み、所持数・達成率・画像の表示。Supabase Auth でセッションを管理し、グッズデータは Go API 経由で取得・更新する。 |
+| Go REST API | 認証・認可、入力検証、グッズの CRUD・検索、エラー応答、DB と画像ストレージへのアクセス。 |
+| Supabase Auth | ログイン、セッション、アクセストークンの発行。 |
+| Supabase PostgreSQL | グッズ、所有者、画像のオブジェクトキーの永続化。論理モデルは [データモデル](03_data-model.md) を参照。 |
+| Cloudflare R2 | 非公開バケットにグッズ画像の本体を保存する。 |
 
-## 2. コンポーネント
+## 2. 認証とデータの所有権
 
+初期リリースは本人用の 1 アカウントを想定する。複数ユーザーへの公開やコレクション共有は将来の検討事項とする。
 
-### 2.1 技術スタック
+1. SPA が Supabase Auth でログインし、`Authorization: Bearer <access_token>` を付けて Go API を呼ぶ。
+2. Go API が署名、発行元、有効期限、想定する対象者（audience）を検証し、初期リリースで許可されたユーザーか確認する。
+3. Go API は検証済みトークンの `sub` を所有者 ID として使う。作成時に所有者を設定し、一覧・詳細・更新・削除・画像操作では所有者を照合する。
+4. Go API からの SQL 接続ではブラウザの JWT が DB に自動伝播しないため、Go 側の所有者チェックを必須とする。DB のロールと RLS の設定は接続方式と合わせて決める。
 
-現時点で以下の技術を採用する。
-未決定の項目については TBD とする。
+DB と R2 の接続用資格情報は API 側で管理する。SPA と API が別オリジンの場合は、API の CORS で許可するフロントエンドのオリジンを明示する。
 
-| 領域 | 技術 | 用途 |
-|---|---|---|
-| Frontend | Next.js + TypeScript | Web UIの構築 |
-| Backend | Next.js Server / Route Handlers | API・サーバーサイド処理 |
-| Database | PostgreSQL | グッズ・コレクションデータの保存 |
-| ORM | Drizzle | PostgreSQLへのアクセス |
-| Image Storage | TBD | グッズ画像の保存 |
-| Hosting | Vercel | Webアプリケーションのホスティング |
-| DB Hosting | Supabase | PostgreSQLのホスティング・グッズ画像の保存 |
-| CI/CD | GitHub Actions | テスト・Lint・ビルドなどの自動化 |
-| Testing | Vitest + Playwright | Unit / Integration / E2Eテスト |
-| Code Quality | ESLint + Prettier | コード品質・フォーマット管理 |
+[Supabase Auth の JWT](https://supabase.com/docs/guides/auth/jwts)
 
-### 2.2 Frontend
+## 3. API とデータフロー
 
-ユーザーが操作するWeb UIを提供する。
+### 3.1 グッズ管理
 
-主な責務：
-
-- グッズ一覧の表示
-- グッズ詳細の表示
-- グッズ登録・編集フォーム
-- 検索・絞り込みUI
-- 所持数などの情報表示
-- 画像の表示
-
----
-
-### 2.3 Backend / API
-
-Frontendからのリクエストを受け取り、データの取得・登録・更新・削除を行う。
-
-主な責務：
-
-- APIの提供
-- リクエストのバリデーション
-- ビジネスロジック
-- PostgreSQLとの通信
-- エラーハンドリング
-
-想定するAPI：
+エンドポイント案は以下のとおり。
 
 ```text
 GET    /api/items
-GET    /api/items/:id
+GET    /api/items/{id}
 POST   /api/items
-PATCH  /api/items/:id
-DELETE /api/items/:id
+PATCH  /api/items/{id}
+DELETE /api/items/{id}
 ```
 
-検索・絞り込みについては、クエリパラメータによる指定を検討する。
+- 一覧取得では Go API が所有者の範囲で検索・絞り込み・ページングし、結果を JSON で返す。検索条件はクエリパラメータで渡す案とする（例 `GET /api/items?character=A&category=バッジ`）。
+- 登録・更新では Go API が入力と権限を検証して PostgreSQL に保存し、結果を返す。
+- パラメータ、レスポンス、エラーの詳細は API 設計時に決める。契約の記述には OpenAPI を候補とする。
 
-例：
+### 3.2 画像の登録と閲覧
 
-```text
-GET /api/items?character=A&category=バッジ
-```
+1. Go API が対象グッズの所有権を確認する。アップロードは、Go API 経由または短命の署名付き URL を使ったブラウザから R2 への直接転送を候補とする。
+2. アップロード成功を確認してから、Go API が R2 のオブジェクトキーを PostgreSQL に保存する。DB への登録失敗やグッズ削除で残った画像の扱いは実装時に決める。
+3. 閲覧時も Go API が所有権を確認する。画像の配信は Go API 経由または短命の署名付き URL を候補とする。
 
----
+## 4. レイヤ構成と拡張
 
-### 2.3 Database
+フロントエンドは表示と入力を担う。Go API 内では HTTP の入出力、グッズ管理の処理、PostgreSQL・R2 へのアクセスの責務を分ける。
 
-PostgreSQLを使用する。
-
-グッズおよび関連する属性を永続化する。
-
-現時点で想定している主なデータ：
-
-- Item
-- Work
-- Character
-- Category
-- Series
-- Tag
-- Collection
-
-具体的なテーブル構造については `data-model.md` およびDB設計で定義する。
-
----
-
-### 2.4 Image Storage
-
-グッズ画像はデータベースに直接保存せず、外部ストレージへの保存を基本方針とする。
-
-```text
-Image
-  │
-  ▼
-Object Storage
-  │
-  │ URL
-  ▼
-PostgreSQL
-```
-
-具体的なストレージサービスは技術選定時に決定する。
-
----
-
-## 3. データフロー
-
-### 3.1 グッズ一覧取得
-
-```text
-Browser
-  │
-  │ GET /api/items
-  ▼
-Backend
-  │
-  │ SQL
-  ▼
-PostgreSQL
-  │
-  │ Result
-  ▼
-Backend
-  │
-  │ JSON
-  ▼
-Browser
-```
-
----
-
-### 3.2 グッズ登録
-
-```text
-Browser
-  │
-  │ POST /api/items
-  ▼
-Backend
-  │
-  ├── Validate
-  │
-  ├── Business Logic
-  │
-  └── INSERT
-        │
-        ▼
-    PostgreSQL
-```
-
-登録成功後、作成されたグッズ情報をFrontendに返す。
-
----
-
-### 3.3 グッズ画像登録
-
-```text
-Browser
-  │
-  │ Upload
-  ▼
-Image Storage
-  │
-  │ URL
-  ▼
-Backend
-  │
-  │ Save image URL
-  ▼
-PostgreSQL
-```
-
-※ 実際のアップロード方式は技術選定時に決定する。
-
----
-
-## 4. レイヤ構成
-
-基本的には以下の責務を分離する。
-
-```text
-┌──────────────────────────┐
-│       Presentation       │
-│   Next.js UI / Pages     │
-├──────────────────────────┤
-│      Application/API     │
-│   Route Handlers / Logic │
-├──────────────────────────┤
-│       Data Access        │
-│         Drizzle          │
-├──────────────────────────┤
-│       PostgreSQL         │
-└──────────────────────────┘
-```
-
----
+API はセッションや画像をインスタンスのローカル状態に保持せず、必要に応じてインスタンスを増やせる構成とする。DB への負荷は、ページング、クエリ・インデックスの見直し、API 全体の接続数の制御で対応する。ルーター、DB アクセスライブラリ、コンテナ、ホスティング、CI/CD は [技術選定の候補](02_tech-stack.md#候補未確定事項) を参照。

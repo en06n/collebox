@@ -2,11 +2,12 @@
 
 ## Item（グッズ）
 
-コレクションの基本単位。
+コレクションの基本単位。以下は移行後の論理モデル。
 
 | フィールド名 | 型 | 必須 | 備考 |
 |---|---|---|---|
 | id | UUID | ✓ | |
+| owner_id | UUID | ✓ | Supabase Auth のユーザー ID |
 | name | string | ✓ | グッズ名 |
 | work | string | | 作品名 |
 | character_names | string[] | | キャラ名（複数可） |
@@ -16,7 +17,7 @@
 | target_quantity | number | | 収集目標数 |
 | release_year | number | | 発売年 |
 | external_url | string | | 外部サイトURL |
-| images | string[] | | 画像ファイルパスまたはURL |
+| images | string[] | | Cloudflare R2 のオブジェクトキー |
 | created_at | datetime | ✓ | |
 | updated_at | datetime | ✓ | |
 
@@ -30,5 +31,5 @@
 ## 未決事項
 
 - [ ] `category` は固定の選択肢にするか、自由入力にするか
-- [ ] 画像はローカル保存かクラウドストレージか
+- [ ] 画像キーを配列カラムで保持するか、画像用テーブルに分けるか
 - [ ] コレクション（グループ）の概念を持つか
