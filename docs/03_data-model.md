@@ -9,6 +9,7 @@
 | id | UUID | ✓ | |
 | owner_id | UUID | ✓ | Supabase Auth のユーザー ID |
 | name | string | ✓ | グッズ名 |
+| series | string | | コンプ率の集計単位。1 件の Item はグッズ 1 種を表す |
 | work | string | | 作品名 |
 | character_names | string[] | | キャラ名（複数可） |
 | category | string | | 種類（バッジ・アクキーなど） |
@@ -16,7 +17,7 @@
 | quantity | number | | 所持数 |
 | target_quantity | number | | 収集目標数 |
 | release_year | number | | 発売年 |
-| external_url | string | | 外部サイトURL |
+| external_url | string | | 公式商品ページなどの URL |
 | images | string[] | | Cloudflare R2 のオブジェクトキー |
 | created_at | datetime | ✓ | |
 | updated_at | datetime | ✓ | |
